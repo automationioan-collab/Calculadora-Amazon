@@ -1,0 +1,250 @@
+{
+  "users": [
+    {
+      "id": "user-demo-br",
+      "name": "Rafael Mendes",
+      "email": "demo@amzhub.com.br",
+      "companyName": "Mendes Comércio Digital Ltda",
+      "taxRegime": "Simples Nacional",
+      "defaultTaxRate": 6.5,
+      "avatarUrl": "/src/assets/images/seller_profile_avatar_1794711815395.jpg",
+      "passwordHash": "0ead2060b65992dca4769af601a1b3a35ef38cfad2c2c465bb160ea764157c5d"
+    }
+  ],
+  "competitors": {
+    "user-demo-br": [
+      {
+        "id": "comp-1",
+        "sellerName": "MegaDistribuidora SP",
+        "sellerId": "A2Q8K9X4PLM1BR",
+        "primaryAsin": "B09V3KXJPB",
+        "productTitle": "Cafeteira Elétrica Inox Programável 30 Xícaras 127V",
+        "category": "Casa e Cozinha",
+        "fulfillment": "FBA",
+        "currentPrice": 249.9,
+        "buyBoxSharePercent": 64,
+        "activeSkus": 48,
+        "estimatedMonthlyRevenue": 142800,
+        "priceChange7d": -5,
+        "lastCheckedAt": "2026-11-14T18:10:00Z"
+      },
+      {
+        "id": "comp-2",
+        "sellerName": "Ferragens Sul Atacado",
+        "sellerId": "A1B7M3Z9WQR2BR",
+        "primaryAsin": "B0C4T8Q2LM",
+        "productTitle": "Kit Chave Catraca Reversível 46 Peças Aço Cromo Vanádio",
+        "category": "Ferramentas",
+        "fulfillment": "FBA",
+        "currentPrice": 119.9,
+        "buyBoxSharePercent": 52,
+        "activeSkus": 83,
+        "estimatedMonthlyRevenue": 98400,
+        "priceChange7d": 0,
+        "lastCheckedAt": "2026-11-14T17:40:00Z"
+      },
+      {
+        "id": "comp-3",
+        "sellerName": "PrimeCasa Utilidades",
+        "sellerId": "A3K5N8T2VYH4BR",
+        "primaryAsin": "B0C7K4W9BV",
+        "productTitle": "Kit 10 Potes Herméticos Vidro Borossilicato Tampa Bambu",
+        "category": "Casa e Cozinha",
+        "fulfillment": "DBA",
+        "currentPrice": 219.9,
+        "buyBoxSharePercent": 71,
+        "activeSkus": 29,
+        "estimatedMonthlyRevenue": 76500,
+        "priceChange7d": -10,
+        "lastCheckedAt": "2026-11-14T16:55:00Z"
+      },
+      {
+        "id": "comp-4",
+        "sellerName": "TechPulse Importados",
+        "sellerId": "A9R4V1L6JCP8BR",
+        "primaryAsin": "B0D4R7N1QX",
+        "productTitle": "Carregador Portátil Power Bank 20000mAh PD 22.5W",
+        "category": "Eletrônicos",
+        "fulfillment": "FBA",
+        "currentPrice": 199.9,
+        "buyBoxSharePercent": 41,
+        "activeSkus": 62,
+        "estimatedMonthlyRevenue": 184200,
+        "priceChange7d": 5,
+        "lastCheckedAt": "2026-11-14T15:20:00Z"
+      }
+    ]
+  },
+  "storeSkus": {
+    "user-demo-br": [
+      {
+        "id": "sku-1",
+        "sku": "AMZ-CAF-01",
+        "asin": "B09V3KXJPB",
+        "title": "Cafeteira Elétrica Inox Programável 30 Xícaras 127V",
+        "category": "Casa e Cozinha",
+        "fulfillment": "FBA",
+        "salePrice": 249.9,
+        "unitCost": 118,
+        "inboundShipping": 6.5,
+        "packagingCost": 2.2,
+        "taxPercent": 6.5,
+        "acosPercent": 4,
+        "weightGrams": 1850,
+        "stockUnits": 42,
+        "dailySalesVelocity": 4.8,
+        "buyBoxOwner": "Sua Loja",
+        "updatedAt": "2026-11-14T18:00:00Z"
+      },
+      {
+        "id": "sku-2",
+        "sku": "AMZ-GAR-04",
+        "asin": "B0B7N5R9KD",
+        "title": "Garrafa Térmica Aço Inox Parede Dupla 1L Tampa Vedação",
+        "category": "Esportes e Aventura",
+        "fulfillment": "FBA",
+        "salePrice": 159,
+        "unitCost": 62,
+        "inboundShipping": 3.4,
+        "packagingCost": 1.8,
+        "taxPercent": 6.5,
+        "acosPercent": 5.5,
+        "weightGrams": 480,
+        "stockUnits": 18,
+        "dailySalesVelocity": 3.1,
+        "buyBoxOwner": "Sua Loja",
+        "updatedAt": "2026-11-14T17:15:00Z"
+      },
+      {
+        "id": "sku-3",
+        "sku": "AMZ-SUP-09",
+        "asin": "B0D1V5G7NT",
+        "title": "Suporte Articulado Pistão a Gás para Monitor 17 a 32\"",
+        "category": "Informática",
+        "fulfillment": "FBA",
+        "salePrice": 179.9,
+        "unitCost": 82,
+        "inboundShipping": 7.2,
+        "packagingCost": 2.5,
+        "taxPercent": 6.5,
+        "acosPercent": 6,
+        "weightGrams": 2100,
+        "stockUnits": 64,
+        "dailySalesVelocity": 3.6,
+        "buyBoxOwner": "Concorrente",
+        "updatedAt": "2026-11-14T14:30:00Z"
+      },
+      {
+        "id": "sku-4",
+        "sku": "AMZ-POT-12",
+        "asin": "B0C7K4W9BV",
+        "title": "Kit 10 Potes Herméticos Vidro Borossilicato Tampa Bambu",
+        "category": "Casa e Cozinha",
+        "fulfillment": "DBA",
+        "salePrice": 219.9,
+        "unitCost": 96,
+        "inboundShipping": 8.5,
+        "packagingCost": 4,
+        "taxPercent": 6.5,
+        "acosPercent": 3.5,
+        "weightGrams": 2400,
+        "stockUnits": 14,
+        "dailySalesVelocity": 2.4,
+        "buyBoxOwner": "Sua Loja",
+        "updatedAt": "2026-11-14T12:10:00Z"
+      },
+      {
+        "id": "sku-5",
+        "sku": "AMZ-CAT-02",
+        "asin": "B0C4T8Q2LM",
+        "title": "Kit Chave Catraca Reversível 46 Peças Aço Cromo Vanádio",
+        "category": "Ferramentas",
+        "fulfillment": "FBA",
+        "salePrice": 119.9,
+        "unitCost": 48.5,
+        "inboundShipping": 3.9,
+        "packagingCost": 1.5,
+        "taxPercent": 6.5,
+        "acosPercent": 4.5,
+        "weightGrams": 920,
+        "stockUnits": 85,
+        "dailySalesVelocity": 5.2,
+        "buyBoxOwner": "Sua Loja",
+        "updatedAt": "2026-11-14T10:45:00Z"
+      }
+    ]
+  },
+  "supplierBatches": {
+    "user-demo-br": []
+  },
+  "plannerScenarios": {
+    "user-demo-br": [
+      {
+        "id": "plan-1",
+        "name": "Expansão FBA Q4 — Reinvestimento 80%",
+        "initialCapital": 25000,
+        "averageTicket": 165,
+        "targetNetMarginPercent": 18,
+        "reinvestmentPercent": 80,
+        "taxPercent": 6.5,
+        "restockCycleDays": 28,
+        "monthlyGrowthPercent": 12
+      },
+      {
+        "id": "plan-2",
+        "name": "Operação Conservadora — Retirada 50%",
+        "initialCapital": 15000,
+        "averageTicket": 140,
+        "targetNetMarginPercent": 16,
+        "reinvestmentPercent": 50,
+        "taxPercent": 6.5,
+        "restockCycleDays": 35,
+        "monthlyGrowthPercent": 6
+      }
+    ]
+  },
+  "alertSettings": {
+    "user-demo-br": {
+      "emailEnabled": true,
+      "notificationEmail": "demo@amzhub.com.br",
+      "pushEnabled": true,
+      "quietHoursStart": "22:00",
+      "quietHoursEnd": "07:00",
+      "rules": [
+        {
+          "id": "alert-1",
+          "name": "Concorrente baixou preço na Cafeteira",
+          "type": "competitor_price_below",
+          "targetAsinOrSku": "B09V3KXJPB",
+          "thresholdValue": 255,
+          "thresholdUnit": "BRL",
+          "channel": "ambos",
+          "enabled": true,
+          "updatedAt": "2026-11-14T18:00:00Z"
+        },
+        {
+          "id": "alert-2",
+          "name": "Estoque baixo — cobertura em dias",
+          "type": "low_stock_days",
+          "targetAsinOrSku": "Todos",
+          "thresholdValue": 12,
+          "thresholdUnit": "dias",
+          "channel": "email",
+          "enabled": true,
+          "updatedAt": "2026-11-14T18:00:00Z"
+        },
+        {
+          "id": "alert-3",
+          "name": "Perda de Buy Box em anúncio ativo",
+          "type": "buybox_lost",
+          "targetAsinOrSku": "Todos",
+          "thresholdValue": 0,
+          "thresholdUnit": "%",
+          "channel": "push",
+          "enabled": true,
+          "updatedAt": "2026-11-14T18:00:00Z"
+        }
+      ]
+    }
+  }
+}

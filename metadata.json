@@ -1,0 +1,8 @@
+{
+  "name": "AmzHub BR — Inteligência e Gestão para Vendedores Amazon Brasil",
+  "description": "Plataforma completa de inteligência de mercado, análise de fornecedores, monitoramento de concorrentes, planejamento financeiro e gestão de loja para vendedores da Amazon Brasil.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

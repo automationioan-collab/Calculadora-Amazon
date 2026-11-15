@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: #f4f7fb;
+    color: #0f172a;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .btn-tech-primary {
+    @apply inline-flex items-center justify-center gap-2 font-semibold text-white rounded-xl
+      bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500
+      shadow-md shadow-indigo-500/25
+      hover:shadow-lg hover:shadow-cyan-500/35 hover:-translate-y-0.5
+      active:translate-y-0 active:scale-[0.98]
+      disabled:opacity-60 disabled:pointer-events-none
+      transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer;
+  }
+
+  .btn-tech-calc {
+    @apply inline-flex items-center justify-center gap-2 font-semibold text-white rounded-xl
+      bg-gradient-to-r from-violet-600 via-fuchsia-600 to-amber-500
+      shadow-md shadow-fuchsia-500/25
+      hover:shadow-lg hover:shadow-violet-500/35 hover:-translate-y-0.5
+      active:translate-y-0 active:scale-[0.98]
+      disabled:opacity-60 disabled:pointer-events-none
+      transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer;
+  }
+
+  .btn-tech-emerald {
+    @apply inline-flex items-center justify-center gap-2 font-semibold text-white rounded-xl
+      bg-gradient-to-r from-emerald-600 to-teal-500
+      shadow-md shadow-emerald-500/25
+      hover:shadow-lg hover:shadow-teal-500/35 hover:-translate-y-0.5
+      active:translate-y-0 active:scale-[0.98]
+      disabled:opacity-60 disabled:pointer-events-none
+      transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer;
+  }
+
+  .btn-tech-secondary {
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl
+      bg-white text-indigo-700 border border-indigo-200
+      shadow-sm shadow-indigo-500/10
+      hover:bg-gradient-to-r hover:from-indigo-600 hover:to-blue-600 hover:text-white hover:border-transparent
+      hover:shadow-md hover:shadow-indigo-500/25 hover:-translate-y-0.5
+      active:translate-y-0 active:scale-[0.98]
+      disabled:opacity-60 disabled:pointer-events-none
+      transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer;
+  }
+
+  .btn-tech-danger {
+    @apply inline-flex items-center justify-center gap-1.5 font-semibold rounded-lg
+      text-rose-600 bg-rose-50 border border-rose-200
+      hover:bg-gradient-to-r hover:from-rose-600 hover:to-pink-600 hover:text-white hover:border-transparent
+      hover:shadow-md hover:shadow-rose-500/25 hover:-translate-y-0.5
+      transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer;
+  }
+
+  .link-tech {
+    @apply inline-flex items-center gap-1.5 font-semibold text-indigo-600
+      hover:text-cyan-600 hover:underline decoration-2 underline-offset-4
+      transition-colors duration-200 cursor-pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
