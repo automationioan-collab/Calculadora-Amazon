@@ -24,8 +24,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
   const [companyName, setCompanyName] = useState('');
   const [phone, setPhone] = useState('');
   const [amazonAccountId, setAmazonAccountId] = useState('');
-  const [email, setEmail] = useState('demo@amzhub.com.br');
-  const [password, setPassword] = useState('demo1234');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,13 +38,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
     setMode(nextMode);
     setError(null);
     setEligibility(null);
-    if (nextMode === 'register') {
-      if (email === 'demo@amzhub.com.br') setEmail('');
-      if (password === 'demo1234') setPassword('');
-    } else {
-      if (!email) setEmail('demo@amzhub.com.br');
-      if (!password) setPassword('demo1234');
-    }
   };
 
   // Automatic recognition of email, phone, and Amazon Seller account for 25-day FREE eligibility
@@ -98,44 +91,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
       onAuthenticated(res.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao autenticar.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDemoAccess = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await apiRequest<{ token: string; user: UserProfile }>(
-        '/api/auth/demo',
-        { method: 'POST' }
-      );
-      setStoredToken(res.token);
-      onAuthenticated(res.user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao carregar conta demo.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAdminDemoAccess = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await apiRequest<{ token: string; user: UserProfile }>(
-        '/api/auth/admin-demo',
-        { method: 'POST' }
-      );
-      setStoredToken(res.token);
-      onAuthenticated(res.user);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Erro ao carregar acesso Administrador FULL.'
-      );
     } finally {
       setLoading(false);
     }
@@ -429,29 +384,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          <div className="mt-5 pt-4 border-t border-slate-200 space-y-2.5">
-            <div className="text-xs text-slate-500">
-              Acesso imediato para demonstração por perfil:
-            </div>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleAdminDemoAccess}
-              className="btn-tech-primary w-full h-10 px-4 text-xs"
-            >
-              <ShieldCheck className="w-4 h-4 shrink-0" />
-              <span>Entrar como Administrador FULL (admin@amzhub.com.br)</span>
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleDemoAccess}
-              className="btn-tech-calc w-full h-10 px-4 text-xs"
-            >
-              <span>Entrar como Assinante Demo (demo@amzhub.com.br)</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>
