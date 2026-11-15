@@ -11,21 +11,31 @@ import type {
   AlertNotificationConfig,
   AlertRule,
   CompetitorWatch,
+  FreeEligibilityResult,
   MarketProduct,
+  PaymentMethod,
   PlannerInputs,
   StoreSku,
+  SubscriberPlan,
+  SubscriberRecord,
+  SubscriberStatus,
+  SubscriptionAccessInfo,
   SupplierAnalyzedItem,
   SupplierBatch,
   SupplierRowInput,
+  TrialIdentityRecord,
   TriggeredAlert,
   UserProfile,
 } from './src/types';
 import {
   createDefaultAlertConfig,
+  FREE_TRIAL_DAYS,
+  PLAN_DEFAULTS,
   SEED_COMPETITORS,
   SEED_MARKET_PRODUCTS,
   SEED_PLANNER_SCENARIOS,
   SEED_STORE_SKUS,
+  SEED_SUBSCRIBERS,
 } from './server/seedData';
 
 dotenv.config();
@@ -46,10 +56,52 @@ interface WorkspaceState {
   supplierBatches: Record<string, SupplierBatch[]>;
   plannerScenarios: Record<string, PlannerInputs[]>;
   alertSettings?: Record<string, AlertNotificationConfig>;
+  subscribers?: SubscriberRecord[];
+  trialRegistry?: TrialIdentityRecord[];
 }
 
 const DEMO_USER_ID = 'user-demo-br';
+const ADMIN_USER_ID = 'user-admin-full';
 const AVATAR_URL = '/src/assets/images/seller_profile_avatar_1794711815395.jpg';
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 12 && digits.startsWith('55')) {
+    return digits.slice(2);
+  }
+  return digits;
+}
+
+function normalizeAmazonId(amazonAccountId: string): string {
+  return amazonAccountId.trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysIso(baseIso: string, days: number): string {
+  const dt = new Date(`${baseIso.slice(0, 10)}T12:00:00.000Z`);
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function formatDateBr(isoDate: string): string {
+  const [y, m, d] = isoDate.slice(0, 10).split('-');
+  return d && m && y ? `${d}/${m}/${y}` : isoDate;
+}
+
+function calculateRemainingTrialDays(trialEndsAtIso: string): number {
+  const endMs = new Date(`${trialEndsAtIso.slice(0, 10)}T23:59:59.999Z`).getTime();
+  if (Number.isNaN(endMs)) return 0;
+  const diff = endMs - Date.now();
+  if (diff <= 0) return 0;
+  return Math.min(FREE_TRIAL_DAYS, Math.ceil(diff / 86400000));
+}
 
 function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(password).digest('hex');
@@ -87,36 +139,164 @@ async function ensureDb(): Promise<WorkspaceState> {
   await fs.mkdir(DATA_DIR, { recursive: true });
   try {
     const raw = await fs.readFile(DB_FILE, 'utf8');
-    return JSON.parse(raw) as WorkspaceState;
+    const parsed = JSON.parse(raw) as WorkspaceState;
+    let dirty = false;
+
+    // Ensure phone, amazonAccountId and 25-day trial dates on legacy users & subscribers
+    for (const u of parsed.users) {
+      if (!u.role) {
+        u.role = u.id === ADMIN_USER_ID ? 'ADMIN_FULL' : 'SUBSCRIBER';
+        dirty = true;
+      }
+      if (u.id === DEMO_USER_ID && (!u.phone || !u.amazonAccountId)) {
+        u.phone = u.phone || '(11) 98412-3310';
+        u.amazonAccountId = u.amazonAccountId || 'A2DEMO8412BR';
+        dirty = true;
+      }
+    }
+
+    // Ensure ADMIN_FULL account exists
+    if (!parsed.users.some((u) => u.id === ADMIN_USER_ID || u.role === 'ADMIN_FULL')) {
+      parsed.users.unshift({
+        id: ADMIN_USER_ID,
+        name: 'Administrador FULL',
+        email: 'admin@amzhub.com.br',
+        phone: '(11) 90000-0000',
+        amazonAccountId: 'ADMINMATRIZBR',
+        companyName: 'AmzHub BR Matriz',
+        taxRegime: 'Lucro Presumido',
+        defaultTaxRate: 6.5,
+        avatarUrl: AVATAR_URL,
+        role: 'ADMIN_FULL',
+        passwordHash: hashPassword('admin1234'),
+      });
+      parsed.competitors[ADMIN_USER_ID] = [...SEED_COMPETITORS];
+      parsed.storeSkus[ADMIN_USER_ID] = [...SEED_STORE_SKUS];
+      parsed.supplierBatches[ADMIN_USER_ID] = [];
+      parsed.plannerScenarios[ADMIN_USER_ID] = [...SEED_PLANNER_SCENARIOS];
+      parsed.alertSettings = parsed.alertSettings || {};
+      parsed.alertSettings[ADMIN_USER_ID] = createDefaultAlertConfig('admin@amzhub.com.br');
+      dirty = true;
+    }
+
+    if (parsed.subscribers) {
+      for (const s of parsed.subscribers) {
+        const seedMatch = SEED_SUBSCRIBERS.find((seed) => seed.email === s.email);
+        if (typeof s.accessGranted !== 'boolean') {
+          s.accessGranted = s.status !== 'Suspenso' && s.status !== 'Inadimplente';
+          dirty = true;
+        }
+        if (!s.phone) {
+          s.phone = seedMatch?.phone || '(11) 99000-0000';
+          dirty = true;
+        }
+        if (!s.amazonAccountId) {
+          s.amazonAccountId = seedMatch?.amazonAccountId || `AMZ${s.id.toUpperCase()}`;
+          dirty = true;
+        }
+        if (!s.trialStartedAt) {
+          s.trialStartedAt = s.createdAt || todayIso();
+          dirty = true;
+        }
+        if (!s.trialEndsAt) {
+          s.trialEndsAt = addDaysIso(s.trialStartedAt, FREE_TRIAL_DAYS);
+          dirty = true;
+        }
+        if (typeof s.isPaidAdmin !== 'boolean') {
+          s.isPaidAdmin = false;
+          dirty = true;
+        }
+        const matchedUser = parsed.users.find(
+          (u) => normalizeEmail(u.email) === normalizeEmail(s.email) && u.role !== 'ADMIN_FULL'
+        );
+        if (matchedUser) {
+          const expectedRole = s.isPaidAdmin ? 'ADMIN_PAID' : 'SUBSCRIBER';
+          if (matchedUser.role !== expectedRole) {
+            matchedUser.role = expectedRole;
+            dirty = true;
+          }
+        }
+      }
+    }
+
+    if (!parsed.trialRegistry) {
+      parsed.trialRegistry = (parsed.subscribers || SEED_SUBSCRIBERS).map((s) => ({
+        id: `trial-${s.id}`,
+        email: normalizeEmail(s.email),
+        phoneDigits: normalizePhone(s.phone || ''),
+        amazonAccountId: normalizeAmazonId(s.amazonAccountId || ''),
+        trialStartedAt: s.trialStartedAt || s.createdAt || todayIso(),
+        trialEndsAt:
+          s.trialEndsAt || addDaysIso(s.createdAt || todayIso(), FREE_TRIAL_DAYS),
+        createdAt: s.createdAt || todayIso(),
+      }));
+      dirty = true;
+    }
+
+    if (dirty) {
+      await fs.writeFile(DB_FILE, JSON.stringify(parsed, null, 2), 'utf8');
+    }
+    return parsed;
   } catch {
     const initial: WorkspaceState = {
       users: [
         {
+          id: ADMIN_USER_ID,
+          name: 'Administrador FULL',
+          email: 'admin@amzhub.com.br',
+          phone: '(11) 90000-0000',
+          amazonAccountId: 'ADMINMATRIZBR',
+          companyName: 'AmzHub BR Matriz',
+          taxRegime: 'Lucro Presumido',
+          defaultTaxRate: 6.5,
+          avatarUrl: AVATAR_URL,
+          role: 'ADMIN_FULL',
+          passwordHash: hashPassword('admin1234'),
+        },
+        {
           id: DEMO_USER_ID,
           name: 'Rafael Mendes',
           email: 'demo@amzhub.com.br',
+          phone: '(11) 98412-3310',
+          amazonAccountId: 'A2DEMO8412BR',
           companyName: 'Mendes Comércio Digital Ltda',
           taxRegime: 'Simples Nacional',
           defaultTaxRate: 6.5,
           avatarUrl: AVATAR_URL,
+          role: 'SUBSCRIBER',
           passwordHash: hashPassword('demo1234'),
         },
       ],
       competitors: {
-        [DEMO_USER_ID]: SEED_COMPETITORS,
+        [ADMIN_USER_ID]: [...SEED_COMPETITORS],
+        [DEMO_USER_ID]: [...SEED_COMPETITORS],
       },
       storeSkus: {
-        [DEMO_USER_ID]: SEED_STORE_SKUS,
+        [ADMIN_USER_ID]: [...SEED_STORE_SKUS],
+        [DEMO_USER_ID]: [...SEED_STORE_SKUS],
       },
       supplierBatches: {
+        [ADMIN_USER_ID]: [],
         [DEMO_USER_ID]: [],
       },
       plannerScenarios: {
-        [DEMO_USER_ID]: SEED_PLANNER_SCENARIOS,
+        [ADMIN_USER_ID]: [...SEED_PLANNER_SCENARIOS],
+        [DEMO_USER_ID]: [...SEED_PLANNER_SCENARIOS],
       },
       alertSettings: {
+        [ADMIN_USER_ID]: createDefaultAlertConfig('admin@amzhub.com.br'),
         [DEMO_USER_ID]: createDefaultAlertConfig('demo@amzhub.com.br'),
       },
+      subscribers: [...SEED_SUBSCRIBERS],
+      trialRegistry: SEED_SUBSCRIBERS.map((s) => ({
+        id: `trial-${s.id}`,
+        email: normalizeEmail(s.email),
+        phoneDigits: normalizePhone(s.phone),
+        amazonAccountId: normalizeAmazonId(s.amazonAccountId),
+        trialStartedAt: s.trialStartedAt,
+        trialEndsAt: s.trialEndsAt,
+        createdAt: s.createdAt,
+      })),
     };
     await fs.writeFile(DB_FILE, JSON.stringify(initial, null, 2), 'utf8');
     return initial;
@@ -128,8 +308,234 @@ async function saveDb(state: WorkspaceState): Promise<void> {
   await fs.writeFile(DB_FILE, JSON.stringify(state, null, 2), 'utf8');
 }
 
-function sanitizeUser(u: StoredUser): UserProfile {
+function evaluateTrialEligibility(
+  db: WorkspaceState,
+  input: { email?: string; phone?: string; amazonAccountId?: string }
+): FreeEligibilityResult {
+  const emailNorm = input.email ? normalizeEmail(input.email) : '';
+  const phoneNorm = input.phone ? normalizePhone(input.phone) : '';
+  const amazonNorm = input.amazonAccountId
+    ? normalizeAmazonId(input.amazonAccountId)
+    : '';
+
+  const matchedFieldsSet = new Set<'email' | 'telefone' | 'conta_amazon'>();
+  let matchedStartedAt: string | null = null;
+  let matchedEndsAt: string | null = null;
+  let hasActivePaid = false;
+
+  const inspectRecord = (rec: {
+    email?: string;
+    phone?: string;
+    phoneDigits?: string;
+    amazonAccountId?: string;
+    trialStartedAt?: string;
+    trialEndsAt?: string;
+    status?: SubscriberStatus;
+    accessGranted?: boolean;
+  }) => {
+    const recEmail = rec.email ? normalizeEmail(rec.email) : '';
+    const recPhone = rec.phoneDigits || (rec.phone ? normalizePhone(rec.phone) : '');
+    const recAmazon = rec.amazonAccountId
+      ? normalizeAmazonId(rec.amazonAccountId)
+      : '';
+
+    let hit = false;
+    if (emailNorm && recEmail && emailNorm === recEmail) {
+      matchedFieldsSet.add('email');
+      hit = true;
+    }
+    if (phoneNorm.length >= 10 && recPhone && phoneNorm === recPhone) {
+      matchedFieldsSet.add('telefone');
+      hit = true;
+    }
+    if (amazonNorm.length >= 4 && recAmazon && amazonNorm === recAmazon) {
+      matchedFieldsSet.add('conta_amazon');
+      hit = true;
+    }
+    if (hit) {
+      if (rec.status === 'Ativo' && rec.accessGranted) {
+        hasActivePaid = true;
+      }
+      if (rec.trialEndsAt) {
+        if (!matchedEndsAt || rec.trialEndsAt < matchedEndsAt) {
+          matchedStartedAt = rec.trialStartedAt || matchedStartedAt;
+          matchedEndsAt = rec.trialEndsAt;
+        }
+      }
+    }
+  };
+
+  for (const t of db.trialRegistry || []) inspectRecord(t);
+  for (const s of db.subscribers || []) inspectRecord(s);
+  for (const u of db.users) {
+    if (u.role !== 'ADMIN_FULL') inspectRecord(u);
+  }
+
+  const matchedFields = Array.from(matchedFieldsSet);
+  const labelsMap: Record<'email' | 'telefone' | 'conta_amazon', string> = {
+    email: 'E-mail',
+    telefone: 'Telefone',
+    conta_amazon: 'Conta da Amazon',
+  };
+  const matchedLabels = matchedFields.map((f) => labelsMap[f]).join(', ');
+
+  if (matchedFields.length === 0) {
+    return {
+      eligibleForFree: true,
+      daysRemaining: FREE_TRIAL_DAYS,
+      trialDaysTotal: FREE_TRIAL_DAYS,
+      trialEndsAt: addDaysIso(todayIso(), FREE_TRIAL_DAYS),
+      matchedFields: [],
+      requiresSubscriptionNow: false,
+      message: `Elegível para ${FREE_TRIAL_DAYS} dias de acesso FREE! E-mail, telefone e conta da Amazon disponíveis.`,
+    };
+  }
+
+  if (hasActivePaid) {
+    return {
+      eligibleForFree: false,
+      daysRemaining: 0,
+      trialDaysTotal: FREE_TRIAL_DAYS,
+      trialEndsAt: matchedEndsAt,
+      matchedFields,
+      requiresSubscriptionNow: false,
+      message: `Identificamos conta com assinatura ativa vinculada (${matchedLabels}). Faça login para acessar.`,
+    };
+  }
+
+  const endsAt = matchedEndsAt || todayIso();
+  const remaining = calculateRemainingTrialDays(endsAt);
+  if (remaining > 0) {
+    return {
+      eligibleForFree: true,
+      daysRemaining: remaining,
+      trialDaysTotal: FREE_TRIAL_DAYS,
+      trialEndsAt: endsAt,
+      matchedFields,
+      requiresSubscriptionNow: false,
+      message: `Identificamos cadastro prévio (${matchedLabels}). Restam ${remaining} dias do prazo FREE até ${formatDateBr(endsAt)}.`,
+    };
+  }
+
+  return {
+    eligibleForFree: false,
+    daysRemaining: 0,
+    trialDaysTotal: FREE_TRIAL_DAYS,
+    trialEndsAt: endsAt,
+    matchedFields,
+    requiresSubscriptionNow: true,
+    message: `Prazo de ${FREE_TRIAL_DAYS} dias FREE já utilizado (${matchedLabels}). Somente com assinatura ativa para continuar.`,
+  };
+}
+
+function registerTrialIdentity(
+  db: WorkspaceState,
+  entry: {
+    email: string;
+    phone: string;
+    amazonAccountId: string;
+    trialStartedAt: string;
+    trialEndsAt: string;
+  }
+): void {
+  db.trialRegistry = db.trialRegistry || [];
+  const emailNorm = normalizeEmail(entry.email);
+  const phoneDigits = normalizePhone(entry.phone);
+  const amazonNorm = normalizeAmazonId(entry.amazonAccountId);
+  const alreadyExact = db.trialRegistry.some(
+    (t) =>
+      t.email === emailNorm &&
+      t.phoneDigits === phoneDigits &&
+      t.amazonAccountId === amazonNorm
+  );
+  if (!alreadyExact) {
+    db.trialRegistry.unshift({
+      id: `trial-${crypto.randomUUID().slice(0, 8)}`,
+      email: emailNorm,
+      phoneDigits,
+      amazonAccountId: amazonNorm,
+      trialStartedAt: entry.trialStartedAt,
+      trialEndsAt: entry.trialEndsAt,
+      createdAt: todayIso(),
+    });
+  }
+}
+
+function computeUserSubscriptionInfo(
+  user: StoredUser,
+  db: WorkspaceState
+): SubscriptionAccessInfo {
+  if (user.role === 'ADMIN_FULL') {
+    const today = todayIso();
+    return {
+      status: 'Ativo',
+      plan: 'Enterprise',
+      trialStartedAt: today,
+      trialEndsAt: today,
+      trialDaysTotal: FREE_TRIAL_DAYS,
+      trialDaysRemaining: 0,
+      isFreeTrialActive: false,
+      isTrialExpired: false,
+      hasPaidSubscription: true,
+      canAccessApp: true,
+    };
+  }
+
+  const emailNorm = normalizeEmail(user.email);
+  const phoneNorm = user.phone ? normalizePhone(user.phone) : '';
+  const amazonNorm = user.amazonAccountId
+    ? normalizeAmazonId(user.amazonAccountId)
+    : '';
+
+  const sub = (db.subscribers || []).find(
+    (s) =>
+      normalizeEmail(s.email) === emailNorm ||
+      (phoneNorm.length >= 10 && normalizePhone(s.phone || '') === phoneNorm) ||
+      (amazonNorm.length >= 4 &&
+        normalizeAmazonId(s.amazonAccountId || '') === amazonNorm)
+  );
+
+  const eligibility = evaluateTrialEligibility(db, {
+    email: user.email,
+    phone: user.phone,
+    amazonAccountId: user.amazonAccountId,
+  });
+
+  const startedAt = sub?.trialStartedAt || todayIso();
+  const endsAt =
+    sub?.trialEndsAt || eligibility.trialEndsAt || addDaysIso(startedAt, FREE_TRIAL_DAYS);
+  const daysRemaining = calculateRemainingTrialDays(endsAt);
+  const status: SubscriberStatus = sub?.status || (daysRemaining > 0 ? 'Trial' : 'Inadimplente');
+  const accessGranted = sub ? sub.accessGranted : daysRemaining > 0;
+
+  const hasPaidSubscription = status === 'Ativo' && accessGranted;
+  const isFreeTrialActive = status === 'Trial' && accessGranted && daysRemaining > 0;
+  const isTrialExpired = !hasPaidSubscription && !isFreeTrialActive;
+  const canAccessApp = hasPaidSubscription || isFreeTrialActive;
+
+  return {
+    status,
+    plan: sub?.plan || 'Starter',
+    trialStartedAt: startedAt,
+    trialEndsAt: endsAt,
+    trialDaysTotal: FREE_TRIAL_DAYS,
+    trialDaysRemaining: daysRemaining,
+    isFreeTrialActive,
+    isTrialExpired,
+    hasPaidSubscription,
+    canAccessApp,
+    recognizedBy: eligibility.matchedFields,
+  };
+}
+
+function sanitizeUser(u: StoredUser, db?: WorkspaceState): UserProfile {
   const { passwordHash: _ignored, ...rest } = u;
+  if (db) {
+    return {
+      ...rest,
+      subscriptionInfo: computeUserSubscriptionInfo(u, db),
+    };
+  }
   return rest;
 }
 
@@ -173,7 +579,78 @@ async function startServer() {
     return { db, user };
   };
 
-  // --- AUTH ROUTES ---
+  // Workspace guard: requires ADMIN_FULL, active paid subscription, or active 25-day FREE trial
+  const requireActiveWorkspaceUser = async (
+    req: express.Request,
+    res: express.Response
+  ): Promise<{ db: WorkspaceState; user: StoredUser } | null> => {
+    const auth = await requireUser(req, res);
+    if (!auth) return null;
+    const subInfo = computeUserSubscriptionInfo(auth.user, auth.db);
+    if (!subInfo.canAccessApp) {
+      res.status(402).json({
+        error:
+          'Seu prazo de 25 dias FREE terminou ou sua assinatura está pendente. Ative um plano para continuar.',
+        code: 'SUBSCRIPTION_REQUIRED',
+      });
+      return null;
+    }
+    return auth;
+  };
+
+  // Strict ADMIN_FULL authorization guard
+  const requireAdminFull = async (
+    req: express.Request,
+    res: express.Response
+  ): Promise<{ db: WorkspaceState; user: StoredUser } | null> => {
+    const auth = await requireUser(req, res);
+    if (!auth) return null;
+    if (auth.user.role !== 'ADMIN_FULL') {
+      res.status(403).json({
+        error: 'Acesso restrito. Somente o Administrador FULL pode executar esta ação.',
+      });
+      return null;
+    }
+    return auth;
+  };
+
+  // Subscriber Admin guard: allows ADMIN_FULL or selected ADMIN_PAID accounts
+  const requireSubscriberAdmin = async (
+    req: express.Request,
+    res: express.Response
+  ): Promise<{ db: WorkspaceState; user: StoredUser } | null> => {
+    const auth = await requireUser(req, res);
+    if (!auth) return null;
+    if (auth.user.role === 'ADMIN_FULL') return auth;
+    if (auth.user.role === 'ADMIN_PAID') {
+      const subInfo = computeUserSubscriptionInfo(auth.user, auth.db);
+      if (!subInfo.canAccessApp) {
+        res.status(403).json({
+          error: 'Sua assinatura está suspensa ou sem acesso liberado.',
+        });
+        return null;
+      }
+      return auth;
+    }
+    res.status(403).json({
+      error:
+        'Acesso restrito. Apenas o Administrador FULL ou cadastros selecionados para administrar assinantes pagos têm acesso.',
+    });
+    return null;
+  };
+
+  // --- AUTH & FREE TRIAL RECOGNITION ROUTES ---
+  app.post('/api/auth/check-free-eligibility', async (req, res) => {
+    const { email, phone, amazonAccountId } = req.body as {
+      email?: string;
+      phone?: string;
+      amazonAccountId?: string;
+    };
+    const db = await ensureDb();
+    const result = evaluateTrialEligibility(db, { email, phone, amazonAccountId });
+    res.json(result);
+  });
+
   app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body as { email?: string; password?: string };
     if (!email || !password) {
@@ -181,50 +658,112 @@ async function startServer() {
     }
     const db = await ensureDb();
     const user = db.users.find(
-      (u) => u.email.toLowerCase() === email.trim().toLowerCase()
+      (u) => normalizeEmail(u.email) === normalizeEmail(email)
     );
     if (!user || user.passwordHash !== hashPassword(password)) {
       return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
     }
+
+    if (user.role !== 'ADMIN_FULL') {
+      const subRecord = (db.subscribers || []).find(
+        (s) => normalizeEmail(s.email) === normalizeEmail(user.email)
+      );
+      if (subRecord && subRecord.status === 'Suspenso' && !subRecord.accessGranted) {
+        return res.status(403).json({
+          error: 'Acesso suspenso pelo Administrador FULL.',
+        });
+      }
+    }
+
     const token = signToken(user.id);
-    res.json({ token, user: sanitizeUser(user) });
+    res.json({ token, user: sanitizeUser(user, db) });
   });
 
   app.post('/api/auth/demo', async (_req, res) => {
     const db = await ensureDb();
-    const demoUser = db.users.find((u) => u.id === DEMO_USER_ID) || db.users[0];
+    const demoUser =
+      db.users.find((u) => u.id === DEMO_USER_ID) ||
+      db.users.find((u) => u.role === 'SUBSCRIBER') ||
+      db.users[0];
     const token = signToken(demoUser.id);
-    res.json({ token, user: sanitizeUser(demoUser) });
+    res.json({ token, user: sanitizeUser(demoUser, db) });
+  });
+
+  app.post('/api/auth/admin-demo', async (_req, res) => {
+    const db = await ensureDb();
+    const adminUser = db.users.find((u) => u.role === 'ADMIN_FULL') || db.users[0];
+    const token = signToken(adminUser.id);
+    res.json({ token, user: sanitizeUser(adminUser, db) });
   });
 
   app.post('/api/auth/register', async (req, res) => {
-    const { name, email, password, companyName } = req.body as {
+    const { name, email, phone, amazonAccountId, password, companyName } = req.body as {
       name?: string;
       email?: string;
+      phone?: string;
+      amazonAccountId?: string;
       password?: string;
       companyName?: string;
     };
+    const cleanPhoneDigits = normalizePhone(phone || '');
+    const cleanAmazonId = normalizeAmazonId(amazonAccountId || '');
+
     if (!name || !email || !password || password.length < 6) {
       return res.status(400).json({
         error: 'Preencha nome, e-mail válido e senha com pelo menos 6 caracteres.',
       });
     }
-    const db = await ensureDb();
-    const exists = db.users.some(
-      (u) => u.email.toLowerCase() === email.trim().toLowerCase()
-    );
-    if (exists) {
-      return res.status(409).json({ error: 'Este e-mail já está cadastrado.' });
+    if (cleanPhoneDigits.length < 10) {
+      return res.status(400).json({
+        error: 'Informe um telefone/WhatsApp válido com DDD para validar os 25 dias FREE.',
+      });
     }
+    if (cleanAmazonId.length < 4) {
+      return res.status(400).json({
+        error: 'Informe sua Conta da Amazon (Seller ID ou código da loja) para validar os 25 dias FREE.',
+      });
+    }
+
+    const db = await ensureDb();
+    const emailNorm = normalizeEmail(email);
+    const exists = db.users.some((u) => normalizeEmail(u.email) === emailNorm);
+    if (exists) {
+      return res.status(409).json({
+        error: 'Este e-mail já está cadastrado. Faça login para verificar seu status.',
+      });
+    }
+
+    // Check email, phone, and Amazon account against registry to calculate 25-day FREE eligibility
+    const eligibility = evaluateTrialEligibility(db, {
+      email: emailNorm,
+      phone: cleanPhoneDigits,
+      amazonAccountId: cleanAmazonId,
+    });
+
+    const today = todayIso();
+    const trialStartedAt = eligibility.matchedFields.length > 0 && eligibility.trialEndsAt
+      ? addDaysIso(eligibility.trialEndsAt, -FREE_TRIAL_DAYS)
+      : today;
+    const trialEndsAt =
+      eligibility.matchedFields.length > 0 && eligibility.trialEndsAt
+        ? eligibility.trialEndsAt
+        : addDaysIso(today, FREE_TRIAL_DAYS);
+    const daysLeft = calculateRemainingTrialDays(trialEndsAt);
+    const initialStatus: SubscriberStatus = daysLeft > 0 ? 'Trial' : 'Inadimplente';
+    const initialAccess = daysLeft > 0;
+
     const newId = `user-${crypto.randomUUID().slice(0, 8)}`;
     const newUser: StoredUser = {
       id: newId,
       name: name.trim(),
-      email: email.trim().toLowerCase(),
+      email: emailNorm,
+      phone: (phone || '').trim(),
+      amazonAccountId: cleanAmazonId,
       companyName: (companyName || `${name.trim()} Store`).trim(),
       taxRegime: 'Simples Nacional',
       defaultTaxRate: 6.5,
       avatarUrl: AVATAR_URL,
+      role: 'SUBSCRIBER',
       passwordHash: hashPassword(password),
     };
     db.users.push(newUser);
@@ -234,21 +773,106 @@ async function startServer() {
     db.plannerScenarios[newId] = [...SEED_PLANNER_SCENARIOS];
     db.alertSettings = db.alertSettings || {};
     db.alertSettings[newId] = createDefaultAlertConfig(newUser.email);
+    db.subscribers = db.subscribers || [...SEED_SUBSCRIBERS];
+    db.subscribers.unshift({
+      id: `sub-${newId}`,
+      name: newUser.name,
+      email: newUser.email,
+      phone: newUser.phone || '',
+      amazonAccountId: cleanAmazonId,
+      companyName: newUser.companyName,
+      plan: 'Starter',
+      monthlyPrice: PLAN_DEFAULTS.Starter.monthlyPrice,
+      status: initialStatus,
+      accessGranted: initialAccess,
+      trialStartedAt,
+      trialEndsAt,
+      skusLimit: PLAN_DEFAULTS.Starter.skusLimit,
+      skusUsed: SEED_STORE_SKUS.length,
+      paymentMethod: 'PIX',
+      nextBillingDate: trialEndsAt,
+      createdAt: today,
+    });
+
+    registerTrialIdentity(db, {
+      email: newUser.email,
+      phone: newUser.phone || cleanPhoneDigits,
+      amazonAccountId: cleanAmazonId,
+      trialStartedAt,
+      trialEndsAt,
+    });
+
     await saveDb(db);
 
     const token = signToken(newId);
-    res.status(201).json({ token, user: sanitizeUser(newUser) });
+    res.status(201).json({ token, user: sanitizeUser(newUser, db), eligibility });
+  });
+
+  app.post('/api/subscription/activate', async (req, res) => {
+    const auth = await requireUser(req, res);
+    if (!auth) return;
+
+    const { plan, paymentMethod } = req.body as {
+      plan?: SubscriberPlan;
+      paymentMethod?: PaymentMethod;
+    };
+    const chosenPlan: SubscriberPlan = plan && PLAN_DEFAULTS[plan] ? plan : 'Pro';
+    const chosenMethod: PaymentMethod = paymentMethod || 'PIX';
+    const defaults = PLAN_DEFAULTS[chosenPlan];
+    const nextBilling = addDaysIso(todayIso(), 30);
+
+    auth.db.subscribers = auth.db.subscribers || [...SEED_SUBSCRIBERS];
+    const idx = auth.db.subscribers.findIndex(
+      (s) => normalizeEmail(s.email) === normalizeEmail(auth.user.email)
+    );
+
+    if (idx !== -1) {
+      auth.db.subscribers[idx] = {
+        ...auth.db.subscribers[idx],
+        plan: chosenPlan,
+        monthlyPrice: defaults.monthlyPrice,
+        skusLimit: defaults.skusLimit,
+        status: 'Ativo',
+        accessGranted: true,
+        paymentMethod: chosenMethod,
+        nextBillingDate: nextBilling,
+      };
+    } else {
+      const today = todayIso();
+      auth.db.subscribers.unshift({
+        id: `sub-${auth.user.id}`,
+        name: auth.user.name,
+        email: auth.user.email,
+        phone: auth.user.phone || '',
+        amazonAccountId: auth.user.amazonAccountId || '',
+        companyName: auth.user.companyName,
+        plan: chosenPlan,
+        monthlyPrice: defaults.monthlyPrice,
+        status: 'Ativo',
+        accessGranted: true,
+        trialStartedAt: today,
+        trialEndsAt: addDaysIso(today, FREE_TRIAL_DAYS),
+        skusLimit: defaults.skusLimit,
+        skusUsed: (auth.db.storeSkus[auth.user.id] || []).length,
+        paymentMethod: chosenMethod,
+        nextBillingDate: nextBilling,
+        createdAt: today,
+      });
+    }
+
+    await saveDb(auth.db);
+    res.json({ user: sanitizeUser(auth.user, auth.db) });
   });
 
   app.get('/api/auth/me', async (req, res) => {
     const auth = await requireUser(req, res);
     if (!auth) return;
-    res.json({ user: sanitizeUser(auth.user) });
+    res.json({ user: sanitizeUser(auth.user, auth.db) });
   });
 
   // --- MARKET EXPLORER (MZMarket style) ---
   app.get('/api/market/products', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
 
     const q = String(req.query.q || '').trim().toLowerCase();
@@ -276,14 +900,14 @@ async function startServer() {
 
   // --- SUPPLIER BULK ANALYZER (MZMagic style) ---
   app.get('/api/supplier/batches', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const batches = auth.db.supplierBatches[auth.user.id] || [];
     res.json({ batches });
   });
 
   app.post('/api/supplier/analyze', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
 
     const { batchName, taxRate, rows } = req.body as {
@@ -369,13 +993,13 @@ async function startServer() {
 
   // --- COMPETITOR SPY (MZSpy style) ---
   app.get('/api/competitors', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     res.json({ competitors: auth.db.competitors[auth.user.id] || [] });
   });
 
   app.post('/api/competitors', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
 
     const { sellerName, sellerId, primaryAsin } = req.body as {
@@ -417,7 +1041,7 @@ async function startServer() {
   });
 
   app.delete('/api/competitors/:id', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const current = auth.db.competitors[auth.user.id] || [];
     auth.db.competitors[auth.user.id] = current.filter((c) => c.id !== req.params.id);
@@ -427,13 +1051,13 @@ async function startServer() {
 
   // --- STORE SKUS (Gestão de Loja) ---
   app.get('/api/store/skus', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     res.json({ skus: auth.db.storeSkus[auth.user.id] || [] });
   });
 
   app.post('/api/store/skus', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
 
     const payload = req.body as Partial<StoreSku>;
@@ -470,7 +1094,7 @@ async function startServer() {
   });
 
   app.patch('/api/store/skus/:id', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const current = auth.db.storeSkus[auth.user.id] || [];
     const idx = current.findIndex((s) => s.id === req.params.id);
@@ -489,7 +1113,7 @@ async function startServer() {
   });
 
   app.delete('/api/store/skus/:id', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const current = auth.db.storeSkus[auth.user.id] || [];
     auth.db.storeSkus[auth.user.id] = current.filter((s) => s.id !== req.params.id);
@@ -499,13 +1123,13 @@ async function startServer() {
 
   // --- PLANNER SCENARIOS (MZPlanner style) ---
   app.get('/api/planner/scenarios', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     res.json({ scenarios: auth.db.plannerScenarios[auth.user.id] || [] });
   });
 
   app.post('/api/planner/scenarios', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const body = req.body as PlannerInputs;
     if (!body.name) {
@@ -522,7 +1146,7 @@ async function startServer() {
   });
 
   app.delete('/api/planner/scenarios/:id', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const current = auth.db.plannerScenarios[auth.user.id] || [];
     auth.db.plannerScenarios[auth.user.id] = current.filter((p) => p.id !== req.params.id);
@@ -544,14 +1168,14 @@ async function startServer() {
   };
 
   app.get('/api/alerts', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const config = await getOrInitAlertConfig(auth.db, auth.user);
     res.json({ config });
   });
 
   app.put('/api/alerts/channels', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const config = await getOrInitAlertConfig(auth.db, auth.user);
     const {
@@ -580,7 +1204,7 @@ async function startServer() {
   });
 
   app.post('/api/alerts/rules', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const config = await getOrInitAlertConfig(auth.db, auth.user);
     const body = req.body as Partial<AlertRule>;
@@ -607,7 +1231,7 @@ async function startServer() {
   });
 
   app.patch('/api/alerts/rules/:id', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const config = await getOrInitAlertConfig(auth.db, auth.user);
     const idx = config.rules.findIndex((r) => r.id === req.params.id);
@@ -626,7 +1250,7 @@ async function startServer() {
   });
 
   app.delete('/api/alerts/rules/:id', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const config = await getOrInitAlertConfig(auth.db, auth.user);
     config.rules = config.rules.filter((r) => r.id !== req.params.id);
@@ -636,7 +1260,7 @@ async function startServer() {
   });
 
   app.post('/api/alerts/evaluate', async (req, res) => {
-    const auth = await requireUser(req, res);
+    const auth = await requireActiveWorkspaceUser(req, res);
     if (!auth) return;
     const config = await getOrInitAlertConfig(auth.db, auth.user);
     const skus = auth.db.storeSkus[auth.user.id] || [];
@@ -776,6 +1400,291 @@ async function startServer() {
     }
 
     res.json({ triggered });
+  });
+
+  // --- ADMIN SUBSCRIBER MANAGEMENT (ADMIN_FULL ONLY) ---
+  const getOrInitSubscribers = async (
+    db: WorkspaceState
+  ): Promise<SubscriberRecord[]> => {
+    if (!db.subscribers) {
+      db.subscribers = [...SEED_SUBSCRIBERS];
+      await saveDb(db);
+    }
+    return db.subscribers;
+  };
+
+  app.get('/api/admin/subscribers', async (req, res) => {
+    const auth = await requireSubscriberAdmin(req, res);
+    if (!auth) return;
+    const subscribers = await getOrInitSubscribers(auth.db);
+    if (auth.user.role === 'ADMIN_PAID') {
+      return res.json({
+        subscribers: subscribers.filter((s) => s.status !== 'Trial'),
+      });
+    }
+    res.json({ subscribers });
+  });
+
+  app.post('/api/admin/subscribers', async (req, res) => {
+    const auth = await requireAdminFull(req, res);
+    if (!auth) return;
+    const subscribers = await getOrInitSubscribers(auth.db);
+    const body = req.body as Partial<SubscriberRecord> & { initialPassword?: string };
+
+    if (!body.name || !body.email) {
+      return res.status(400).json({ error: 'Informe nome e e-mail do assinante.' });
+    }
+
+    const emailLower = body.email.trim().toLowerCase();
+    if (subscribers.some((s) => s.email.toLowerCase() === emailLower)) {
+      return res.status(409).json({ error: 'Já existe um assinante cadastrado com este e-mail.' });
+    }
+
+    const plan: SubscriberPlan = body.plan || 'Pro';
+    const status: SubscriberStatus = (body.status as SubscriberStatus) || 'Trial';
+    const phone = (body.phone || '').trim();
+    const amazonAccountId = normalizeAmazonId(body.amazonAccountId || '');
+    const today = todayIso();
+    const trialStartedAt = body.trialStartedAt || today;
+    const trialEndsAt = body.trialEndsAt || addDaysIso(trialStartedAt, FREE_TRIAL_DAYS);
+    const accessGranted =
+      typeof body.accessGranted === 'boolean'
+        ? body.accessGranted
+        : status !== 'Suspenso';
+    const isPaidAdmin = Boolean(body.isPaidAdmin);
+    const defaults = PLAN_DEFAULTS[plan];
+
+    const entry: SubscriberRecord = {
+      id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+      name: body.name.trim(),
+      email: emailLower,
+      phone,
+      amazonAccountId,
+      companyName: (body.companyName || `${body.name.trim()} Store`).trim(),
+      plan,
+      monthlyPrice: Number(body.monthlyPrice ?? defaults.monthlyPrice),
+      status,
+      accessGranted,
+      isPaidAdmin,
+      trialStartedAt,
+      trialEndsAt,
+      skusLimit: Number(body.skusLimit ?? defaults.skusLimit),
+      skusUsed: Number(body.skusUsed ?? 0),
+      paymentMethod: (body.paymentMethod as PaymentMethod) || 'Cartão',
+      nextBillingDate:
+        body.nextBillingDate ||
+        (status === 'Trial' ? trialEndsAt : addDaysIso(today, 30)),
+      createdAt: today,
+    };
+
+    // Provision login account for the subscriber if not already in db.users
+    if (!auth.db.users.some((u) => normalizeEmail(u.email) === emailLower)) {
+      const uid = `user-${crypto.randomUUID().slice(0, 8)}`;
+      auth.db.users.push({
+        id: uid,
+        name: entry.name,
+        email: entry.email,
+        phone: entry.phone,
+        amazonAccountId: entry.amazonAccountId,
+        companyName: entry.companyName,
+        taxRegime: 'Simples Nacional',
+        defaultTaxRate: 6.5,
+        avatarUrl: AVATAR_URL,
+        role: isPaidAdmin ? 'ADMIN_PAID' : 'SUBSCRIBER',
+        passwordHash: hashPassword(body.initialPassword || '123456'),
+      });
+      auth.db.competitors[uid] = [...SEED_COMPETITORS];
+      auth.db.storeSkus[uid] = [...SEED_STORE_SKUS];
+      auth.db.supplierBatches[uid] = [];
+      auth.db.plannerScenarios[uid] = [...SEED_PLANNER_SCENARIOS];
+      auth.db.alertSettings = auth.db.alertSettings || {};
+      auth.db.alertSettings[uid] = createDefaultAlertConfig(entry.email);
+    }
+
+    registerTrialIdentity(auth.db, {
+      email: entry.email,
+      phone: entry.phone,
+      amazonAccountId: entry.amazonAccountId,
+      trialStartedAt: entry.trialStartedAt,
+      trialEndsAt: entry.trialEndsAt,
+    });
+
+    auth.db.subscribers = [entry, ...subscribers];
+    await saveDb(auth.db);
+    res.status(201).json({ subscriber: entry, subscribers: auth.db.subscribers });
+  });
+
+  app.patch('/api/admin/subscribers/:id', async (req, res) => {
+    const auth = await requireSubscriberAdmin(req, res);
+    if (!auth) return;
+    const subscribers = await getOrInitSubscribers(auth.db);
+    const idx = subscribers.findIndex((s) => s.id === req.params.id);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Assinante não encontrado.' });
+    }
+
+    const rawPatch = req.body as Partial<SubscriberRecord>;
+    const current = subscribers[idx];
+    const isFullAdmin = auth.user.role === 'ADMIN_FULL';
+
+    if (!isFullAdmin) {
+      if (current.status === 'Trial') {
+        return res.status(403).json({
+          error:
+            'Administradores selecionados só podem gerenciar assinantes pagos e suas assinaturas.',
+        });
+      }
+      if (
+        rawPatch.isPaidAdmin !== undefined &&
+        Boolean(rawPatch.isPaidAdmin) !== Boolean(current.isPaidAdmin)
+      ) {
+        return res.status(403).json({
+          error:
+            'Somente o Administrador FULL pode selecionar ou remover administradores.',
+        });
+      }
+      if (rawPatch.status === 'Trial') {
+        return res.status(403).json({
+          error: 'Não é permitido converter assinante pago para Trial por este perfil.',
+        });
+      }
+    }
+
+    // Limit patch fields for ADMIN_PAID strictly to subscription access & plan management
+    const patch: Partial<SubscriberRecord> = isFullAdmin
+      ? rawPatch
+      : {
+          accessGranted: rawPatch.accessGranted,
+          status: rawPatch.status,
+          plan: rawPatch.plan,
+          nextBillingDate: rawPatch.nextBillingDate,
+        };
+
+    const prevEmail = current.email.toLowerCase();
+    const nextPlan = patch.plan || current.plan;
+    const planChanged = Boolean(patch.plan && patch.plan !== current.plan);
+    const defaults = PLAN_DEFAULTS[nextPlan];
+    const nextStatus = patch.status || current.status;
+    const nextAccess =
+      typeof patch.accessGranted === 'boolean'
+        ? patch.accessGranted
+        : patch.status
+          ? nextStatus !== 'Suspenso'
+          : current.accessGranted;
+    const nextIsPaidAdmin = isFullAdmin
+      ? patch.isPaidAdmin !== undefined
+        ? Boolean(patch.isPaidAdmin)
+        : Boolean(current.isPaidAdmin)
+      : Boolean(current.isPaidAdmin);
+
+    const updated: SubscriberRecord = {
+      ...current,
+      ...patch,
+      id: current.id,
+      email: (patch.email || current.email).trim().toLowerCase(),
+      phone: (patch.phone !== undefined ? patch.phone : current.phone || '').trim(),
+      amazonAccountId: normalizeAmazonId(
+        patch.amazonAccountId !== undefined
+          ? patch.amazonAccountId
+          : current.amazonAccountId || ''
+      ),
+      name: (patch.name || current.name).trim(),
+      companyName: (patch.companyName || current.companyName).trim(),
+      plan: nextPlan,
+      status: nextStatus,
+      accessGranted: nextAccess,
+      isPaidAdmin: nextIsPaidAdmin,
+      trialStartedAt: patch.trialStartedAt || current.trialStartedAt || current.createdAt,
+      trialEndsAt:
+        patch.trialEndsAt ||
+        current.trialEndsAt ||
+        addDaysIso(current.createdAt || todayIso(), FREE_TRIAL_DAYS),
+      monthlyPrice:
+        patch.monthlyPrice !== undefined
+          ? Number(patch.monthlyPrice)
+          : planChanged
+            ? defaults.monthlyPrice
+            : current.monthlyPrice,
+      skusLimit:
+        patch.skusLimit !== undefined
+          ? Number(patch.skusLimit)
+          : planChanged
+            ? defaults.skusLimit
+            : current.skusLimit,
+    };
+
+    // Sync corresponding subscriber user account (or create on grant access / admin selection)
+    const userIdx = auth.db.users.findIndex(
+      (u) => normalizeEmail(u.email) === prevEmail && u.role !== 'ADMIN_FULL'
+    );
+    const nextRole = updated.isPaidAdmin ? 'ADMIN_PAID' : 'SUBSCRIBER';
+    if (userIdx !== -1) {
+      auth.db.users[userIdx] = {
+        ...auth.db.users[userIdx],
+        name: updated.name,
+        email: updated.email,
+        phone: updated.phone,
+        amazonAccountId: updated.amazonAccountId,
+        companyName: updated.companyName,
+        role: nextRole,
+      };
+    } else if (
+      (updated.accessGranted || updated.isPaidAdmin) &&
+      !auth.db.users.some((u) => normalizeEmail(u.email) === updated.email)
+    ) {
+      const uid = `user-${crypto.randomUUID().slice(0, 8)}`;
+      auth.db.users.push({
+        id: uid,
+        name: updated.name,
+        email: updated.email,
+        phone: updated.phone,
+        amazonAccountId: updated.amazonAccountId,
+        companyName: updated.companyName,
+        taxRegime: 'Simples Nacional',
+        defaultTaxRate: 6.5,
+        avatarUrl: AVATAR_URL,
+        role: nextRole,
+        passwordHash: hashPassword('123456'),
+      });
+      auth.db.competitors[uid] = [...SEED_COMPETITORS];
+      auth.db.storeSkus[uid] = [...SEED_STORE_SKUS];
+      auth.db.supplierBatches[uid] = [];
+      auth.db.plannerScenarios[uid] = [...SEED_PLANNER_SCENARIOS];
+      auth.db.alertSettings = auth.db.alertSettings || {};
+      auth.db.alertSettings[uid] = createDefaultAlertConfig(updated.email);
+    }
+
+    registerTrialIdentity(auth.db, {
+      email: updated.email,
+      phone: updated.phone,
+      amazonAccountId: updated.amazonAccountId,
+      trialStartedAt: updated.trialStartedAt,
+      trialEndsAt: updated.trialEndsAt,
+    });
+
+    subscribers[idx] = updated;
+    auth.db.subscribers = subscribers;
+    await saveDb(auth.db);
+
+    const responseList = isFullAdmin
+      ? subscribers
+      : subscribers.filter((s) => s.status !== 'Trial');
+    res.json({ subscriber: updated, subscribers: responseList });
+  });
+
+  app.delete('/api/admin/subscribers/:id', async (req, res) => {
+    const auth = await requireAdminFull(req, res);
+    if (!auth) return;
+    const subscribers = await getOrInitSubscribers(auth.db);
+    const target = subscribers.find((s) => s.id === req.params.id);
+    if (target) {
+      auth.db.users = auth.db.users.filter(
+        (u) => u.role === 'ADMIN_FULL' || u.email.toLowerCase() !== target.email.toLowerCase()
+      );
+    }
+    auth.db.subscribers = subscribers.filter((s) => s.id !== req.params.id);
+    await saveDb(auth.db);
+    res.json({ subscribers: auth.db.subscribers });
   });
 
   // Vite middleware in dev, static build in production

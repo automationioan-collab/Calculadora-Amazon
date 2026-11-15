@@ -8,16 +8,37 @@ export type WorkspaceTab =
   | 'spy'
   | 'planner'
   | 'store'
-  | 'alerts';
+  | 'alerts'
+  | 'admin';
+
+export type UserRole = 'ADMIN_FULL' | 'ADMIN_PAID' | 'SUBSCRIBER';
+
+export interface SubscriptionAccessInfo {
+  status: SubscriberStatus;
+  plan: SubscriberPlan;
+  trialStartedAt: string;
+  trialEndsAt: string;
+  trialDaysTotal: number;
+  trialDaysRemaining: number;
+  isFreeTrialActive: boolean;
+  isTrialExpired: boolean;
+  hasPaidSubscription: boolean;
+  canAccessApp: boolean;
+  recognizedBy?: Array<'email' | 'telefone' | 'conta_amazon'>;
+}
 
 export interface UserProfile {
   id: string;
   name: string;
   email: string;
+  phone?: string;
+  amazonAccountId?: string;
   companyName: string;
   taxRegime: 'Simples Nacional' | 'Lucro Presumido' | 'MEI';
   defaultTaxRate: number;
   avatarUrl: string;
+  role: UserRole;
+  subscriptionInfo?: SubscriptionAccessInfo;
 }
 
 export interface MarketProduct {
@@ -189,4 +210,51 @@ export interface TriggeredAlert {
   thresholdText: string;
   channel: AlertChannel;
   severity: 'alta' | 'media';
+}
+
+export type SubscriberPlan = 'Starter' | 'Pro' | 'Enterprise';
+
+export type SubscriberStatus = 'Ativo' | 'Trial' | 'Inadimplente' | 'Suspenso';
+
+export type PaymentMethod = 'PIX' | 'Cartão' | 'Boleto';
+
+export interface SubscriberRecord {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  amazonAccountId: string;
+  companyName: string;
+  plan: SubscriberPlan;
+  monthlyPrice: number;
+  status: SubscriberStatus;
+  accessGranted: boolean;
+  isPaidAdmin?: boolean;
+  trialStartedAt: string;
+  trialEndsAt: string;
+  skusLimit: number;
+  skusUsed: number;
+  paymentMethod: PaymentMethod;
+  nextBillingDate: string;
+  createdAt: string;
+}
+
+export interface TrialIdentityRecord {
+  id: string;
+  email: string;
+  phoneDigits: string;
+  amazonAccountId: string;
+  trialStartedAt: string;
+  trialEndsAt: string;
+  createdAt: string;
+}
+
+export interface FreeEligibilityResult {
+  eligibleForFree: boolean;
+  daysRemaining: number;
+  trialDaysTotal: number;
+  trialEndsAt: string | null;
+  matchedFields: Array<'email' | 'telefone' | 'conta_amazon'>;
+  requiresSubscriptionNow: boolean;
+  message: string;
 }

@@ -9,6 +9,7 @@ import {
   LogOut,
   Package,
   TrendingUp,
+  Users,
   X,
 } from 'lucide-react';
 import type { UserProfile, WorkspaceTab } from '../types';
@@ -20,6 +21,7 @@ interface SidebarProps {
   onLogout: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  highlightedTourTab?: WorkspaceTab | null;
 }
 
 const NAV_ITEMS: Array<{
@@ -96,6 +98,14 @@ const NAV_ITEMS: Array<{
     activeGradient: 'from-rose-500 to-amber-500 shadow-rose-500/25',
     iconColor: 'text-rose-500',
   },
+  {
+    id: 'admin',
+    label: 'Assinantes',
+    subtitle: 'Painel Admin SaaS',
+    icon: Users,
+    activeGradient: 'from-cyan-600 to-indigo-700 shadow-cyan-500/25',
+    iconColor: 'text-cyan-600',
+  },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -105,6 +115,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onLogout,
   mobileOpen,
   onCloseMobile,
+  highlightedTourTab = null,
 }) => {
   const [avatarFailed, setAvatarFailed] = useState(false);
 
@@ -139,9 +150,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Navigation List */}
       <nav aria-label="Navegação principal" className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter(
+          (item) =>
+            item.id !== 'admin' ||
+            user.role === 'ADMIN_FULL' ||
+            user.role === 'ADMIN_PAID'
+        ).map((item) => {
           const Icon = item.icon;
           const active = activeTab === item.id;
+          const isTourHighlighted = highlightedTourTab === item.id;
+          const displayLabel =
+            item.id === 'admin' && user.role === 'ADMIN_PAID'
+              ? 'Assinantes Pagos'
+              : item.label;
+          const displaySubtitle =
+            item.id === 'admin' && user.role === 'ADMIN_PAID'
+              ? 'Liberar assinaturas'
+              : item.subtitle;
           return (
             <button
               key={item.id}
@@ -151,6 +176,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onCloseMobile();
               }}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left transition-all duration-200 cursor-pointer ${
+                isTourHighlighted ? 'ring-2 ring-amber-400 ring-offset-2' : ''
+              } ${
                 active
                   ? `bg-gradient-to-r ${item.activeGradient} text-white shadow-md`
                   : item.featured
@@ -165,14 +192,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold truncate whitespace-nowrap">
-                  {item.label}
+                  {displayLabel}
                 </div>
                 <div
                   className={`text-[11px] truncate ${
                     active ? 'text-white/85' : 'text-slate-500'
                   }`}
                 >
-                  {item.subtitle}
+                  {displaySubtitle}
                 </div>
               </div>
             </button>
@@ -202,6 +229,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="text-[11px] text-slate-500 truncate">
               {user.companyName} · {user.taxRegime}
+            </div>
+            <div
+              className={`text-[11px] font-semibold mt-0.5 truncate ${
+                user.role === 'ADMIN_FULL'
+                  ? 'text-indigo-700'
+                  : user.role === 'ADMIN_PAID'
+                    ? 'text-cyan-700'
+                    : 'text-slate-500'
+              }`}
+            >
+              {user.role === 'ADMIN_FULL'
+                ? 'Administrador FULL'
+                : user.role === 'ADMIN_PAID'
+                  ? 'Admin Assinantes Pagos'
+                  : 'Assinante'}
             </div>
           </div>
         </div>

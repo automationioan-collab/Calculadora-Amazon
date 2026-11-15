@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, Calculator, Menu, Plus } from 'lucide-react';
+import { Bell, Calculator, Clock, Compass, Menu, Plus, Sparkles } from 'lucide-react';
+import { AdminSubscribersView } from './components/AdminSubscribersView';
 import { AlertsSettingsView } from './components/AlertsSettingsView';
 import { CalculatorView } from './components/CalculatorView';
 import { CompetitorSpyView } from './components/CompetitorSpyView';
@@ -9,7 +10,9 @@ import { OverviewView } from './components/OverviewView';
 import { PlannerView } from './components/PlannerView';
 import { Sidebar } from './components/Sidebar';
 import { StoreManagementView } from './components/StoreManagementView';
+import { SubscriptionPaywallView } from './components/SubscriptionPaywallView';
 import { SupplierAnalyzerView } from './components/SupplierAnalyzerView';
+import { WelcomeTourModal } from './components/WelcomeTourModal';
 import type {
   CompetitorWatch,
   MarketProduct,
@@ -53,6 +56,10 @@ const TAB_META: Record<WorkspaceTab, { title: string; subtitle: string }> = {
     title: 'Configurações de Alertas',
     subtitle: 'Limites de preço, estoque baixo e notificações via e-mail ou push',
   },
+  admin: {
+    title: 'Administração de Assinantes',
+    subtitle: 'Gerenciamento de planos, cobranças, trials e MRR da plataforma',
+  },
 };
 
 export default function App() {
@@ -64,16 +71,31 @@ export default function App() {
   const [skus, setSkus] = useState<StoreSku[]>([]);
   const [competitors, setCompetitors] = useState<CompetitorWatch[]>([]);
   const [scenarios, setScenarios] = useState<PlannerInputs[]>([]);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [highlightedTourTab, setHighlightedTourTab] = useState<WorkspaceTab | null>(null);
 
-  const loadWorkspaceData = useCallback(async () => {
-    const [skuRes, compRes, planRes] = await Promise.all([
-      apiRequest<{ skus: StoreSku[] }>('/api/store/skus'),
-      apiRequest<{ competitors: CompetitorWatch[] }>('/api/competitors'),
-      apiRequest<{ scenarios: PlannerInputs[] }>('/api/planner/scenarios'),
-    ]);
-    setSkus(skuRes.skus);
-    setCompetitors(compRes.competitors);
-    setScenarios(planRes.scenarios);
+  const loadWorkspaceData = useCallback(async (targetUser?: UserProfile) => {
+    if (
+      targetUser &&
+      targetUser.role !== 'ADMIN_FULL' &&
+      targetUser.subscriptionInfo &&
+      !targetUser.subscriptionInfo.canAccessApp
+    ) {
+      return;
+    }
+    try {
+      const [skuRes, compRes, planRes] = await Promise.all([
+        apiRequest<{ skus: StoreSku[] }>('/api/store/skus'),
+        apiRequest<{ competitors: CompetitorWatch[] }>('/api/competitors'),
+        apiRequest<{ scenarios: PlannerInputs[] }>('/api/planner/scenarios'),
+      ]);
+      setSkus(skuRes.skus);
+      setCompetitors(compRes.competitors);
+      setScenarios(planRes.scenarios);
+    } catch {
+      // If subscription is required (402), paywall handles activation
+    }
   }, []);
 
   useEffect(() => {
@@ -85,7 +107,14 @@ export default function App() {
     apiRequest<{ user: UserProfile }>('/api/auth/me')
       .then(async (res) => {
         setUser(res.user);
-        await loadWorkspaceData();
+        if (
+          res.user.role !== 'ADMIN_FULL' &&
+          res.user.subscriptionInfo?.canAccessApp !== false &&
+          !localStorage.getItem(`amzhub_tour_done_${res.user.id}`)
+        ) {
+          setTourOpen(true);
+        }
+        await loadWorkspaceData(res.user);
       })
       .catch(() => {
         setStoredToken(null);
@@ -97,15 +126,44 @@ export default function App() {
 
   const handleAuthenticated = async (authedUser: UserProfile) => {
     setUser(authedUser);
+    setActiveTab('overview');
+    setShowUpgradeModal(false);
+    if (
+      authedUser.role !== 'ADMIN_FULL' &&
+      authedUser.subscriptionInfo?.canAccessApp !== false &&
+      !localStorage.getItem(`amzhub_tour_done_${authedUser.id}`)
+    ) {
+      setTourOpen(true);
+    } else {
+      setTourOpen(false);
+    }
     if (window.location.pathname === '/login') {
       window.history.replaceState({}, '', '/');
     }
-    await loadWorkspaceData();
+    await loadWorkspaceData(authedUser);
+  };
+
+  const handleCloseTour = () => {
+    if (user) {
+      localStorage.setItem(`amzhub_tour_done_${user.id}`, '1');
+    }
+    setTourOpen(false);
+    setHighlightedTourTab(null);
+  };
+
+  const handleSubscriptionActivated = async (updatedUser: UserProfile) => {
+    setUser(updatedUser);
+    setShowUpgradeModal(false);
+    await loadWorkspaceData(updatedUser);
   };
 
   const handleLogout = () => {
     setStoredToken(null);
     setUser(null);
+    setActiveTab('overview');
+    setShowUpgradeModal(false);
+    setTourOpen(false);
+    setHighlightedTourTab(null);
     setSkus([]);
     setCompetitors([]);
     setScenarios([]);
@@ -208,7 +266,22 @@ export default function App() {
     return <LoginView onAuthenticated={handleAuthenticated} />;
   }
 
+  if (
+    user.role !== 'ADMIN_FULL' &&
+    user.subscriptionInfo &&
+    !user.subscriptionInfo.canAccessApp
+  ) {
+    return (
+      <SubscriptionPaywallView
+        user={user}
+        onActivated={handleSubscriptionActivated}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   const meta = TAB_META[activeTab];
+  const subInfo = user.subscriptionInfo;
 
   return (
     <div className="min-h-screen flex bg-[#f4f7fb] text-slate-900">
@@ -219,6 +292,7 @@ export default function App() {
         onLogout={handleLogout}
         mobileOpen={mobileOpen}
         onCloseMobile={() => setMobileOpen(false)}
+        highlightedTourTab={highlightedTourTab}
       />
 
       <div className="flex-1 min-w-0 flex flex-col">
@@ -249,6 +323,14 @@ export default function App() {
           <div className="flex items-center gap-3 shrink-0">
             <button
               type="button"
+              onClick={() => setTourOpen(true)}
+              className="hidden md:inline-flex btn-tech-secondary h-9 px-3.5 text-xs"
+            >
+              <Compass className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Tour Guiado</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('alerts')}
               className="hidden md:inline-flex btn-tech-secondary h-9 px-3.5 text-xs"
             >
@@ -273,6 +355,34 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {/* 25-day FREE trial countdown strip */}
+        {user.role !== 'ADMIN_FULL' && subInfo?.isFreeTrialActive && (
+          <div className="bg-gradient-to-r from-indigo-50 via-cyan-50 to-emerald-50 border-b border-indigo-200/80 px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-xs text-slate-800">
+              <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span>
+                <strong>Período FREE de 25 dias ativo:</strong> restam{' '}
+                <strong className="text-indigo-700 tabular-nums">
+                  {subInfo.trialDaysRemaining} dias
+                </strong>{' '}
+                (até{' '}
+                <span className="font-mono">
+                  {subInfo.trialEndsAt.split('-').reverse().join('/')}
+                </span>
+                ). Após esse prazo, somente com assinatura.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowUpgradeModal(true)}
+              className="btn-tech-emerald h-8 px-3.5 text-xs"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Assinar Plano</span>
+            </button>
+          </div>
+        )}
 
         {/* Main Workspace Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1380px] w-full mx-auto">
@@ -320,8 +430,46 @@ export default function App() {
           {activeTab === 'alerts' && (
             <AlertsSettingsView skus={skus} competitors={competitors} />
           )}
+          {activeTab === 'admin' &&
+            (user.role === 'ADMIN_FULL' || user.role === 'ADMIN_PAID' ? (
+              <AdminSubscribersView userRole={user.role} />
+            ) : (
+              <div className="bg-white border border-rose-200 rounded-2xl p-8 text-center space-y-4 max-w-lg mx-auto my-8">
+                <h2 className="text-lg font-bold text-slate-900">
+                  Acesso restrito aos Administradores
+                </h2>
+                <p className="text-sm text-slate-600">
+                  Apenas o Administrador FULL ou cadastros selecionados para administrar assinantes pagos podem acessar este painel.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('overview')}
+                  className="btn-tech-primary px-5 h-10 text-xs"
+                >
+                  Voltar para Visão Geral
+                </button>
+              </div>
+            ))}
         </main>
       </div>
+
+      {showUpgradeModal && (
+        <SubscriptionPaywallView
+          user={user}
+          isModal
+          onClose={() => setShowUpgradeModal(false)}
+          onActivated={handleSubscriptionActivated}
+          onLogout={handleLogout}
+        />
+      )}
+
+      <WelcomeTourModal
+        open={tourOpen}
+        userName={user.name}
+        onNavigateTab={setActiveTab}
+        onHighlightTab={setHighlightedTourTab}
+        onClose={handleCloseTour}
+      />
     </div>
   );
 }
