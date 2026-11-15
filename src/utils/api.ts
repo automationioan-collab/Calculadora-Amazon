@@ -1,4 +1,13 @@
+import { auth } from '../lib/firebase';
+
 const TOKEN_KEY = 'amzhub_br_token';
+
+// Firebase ID tokens are kept strictly in memory (never in localStorage).
+let firebaseMemoryToken: string | null = null;
+
+export function setFirebaseMemoryToken(token: string | null): void {
+  firebaseMemoryToken = token;
+}
 
 export function getStoredToken(): string | null {
   try {
@@ -17,11 +26,25 @@ export function setStoredToken(token: string | null): void {
   }
 }
 
+export async function getActiveAuthToken(): Promise<string | null> {
+  if (auth.currentUser) {
+    try {
+      const fresh = await auth.currentUser.getIdToken();
+      firebaseMemoryToken = fresh;
+      return fresh;
+    } catch {
+      return firebaseMemoryToken;
+    }
+  }
+  if (firebaseMemoryToken) return firebaseMemoryToken;
+  return getStoredToken();
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getStoredToken();
+  const token = await getActiveAuthToken();
   const headers = new Headers(options.headers || {});
   if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json');

@@ -21,7 +21,14 @@ import type {
   UserProfile,
   WorkspaceTab,
 } from './types';
-import { apiRequest, getStoredToken, setStoredToken } from './utils/api';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './lib/firebase';
+import {
+  apiRequest,
+  getStoredToken,
+  setFirebaseMemoryToken,
+  setStoredToken,
+} from './utils/api';
 
 const TAB_META: Record<WorkspaceTab, { title: string; subtitle: string }> = {
   overview: {
@@ -99,13 +106,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const token = getStoredToken();
-    if (!token) {
-      setBooting(false);
-      return;
-    }
-    apiRequest<{ user: UserProfile }>('/api/auth/me')
-      .then(async (res) => {
+    let active = true;
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      try {
+        if (fbUser) {
+          const idToken = await fbUser.getIdToken();
+          setFirebaseMemoryToken(idToken);
+        } else {
+          setFirebaseMemoryToken(null);
+          if (!getStoredToken()) {
+            if (active) setBooting(false);
+            return;
+          }
+        }
+        const res = await apiRequest<{ user: UserProfile }>('/api/auth/me');
+        if (!active) return;
         setUser(res.user);
         if (
           res.user.role !== 'ADMIN_FULL' &&
@@ -115,13 +130,18 @@ export default function App() {
           setTourOpen(true);
         }
         await loadWorkspaceData(res.user);
-      })
-      .catch(() => {
+      } catch {
+        setFirebaseMemoryToken(null);
         setStoredToken(null);
-      })
-      .finally(() => {
-        setBooting(false);
-      });
+      } finally {
+        if (active) setBooting(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [loadWorkspaceData]);
 
   const handleAuthenticated = async (authedUser: UserProfile) => {
@@ -158,6 +178,8 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    signOut(auth).catch(() => {});
+    setFirebaseMemoryToken(null);
     setStoredToken(null);
     setUser(null);
     setActiveTab('overview');
