@@ -22,13 +22,16 @@ import type {
   SubscriberPlan,
   SubscriberRecord,
   SubscriberStatus,
+  UserProfile,
   UserRole,
 } from '../types';
 import { apiRequest } from '../utils/api';
 import { formatBRL, formatNumberBR } from '../utils/amazonBr';
+import { FullAdminsManager } from './FullAdminsManager';
 
 interface AdminSubscribersViewProps {
   userRole: UserRole;
+  onCurrentUserUpdated?: (user: UserProfile) => void;
 }
 
 const PLAN_PRICING_META: Record<
@@ -51,8 +54,12 @@ function getTrialDaysLeft(trialEndsAt?: string): number {
 
 export const AdminSubscribersView: React.FC<AdminSubscribersViewProps> = ({
   userRole,
+  onCurrentUserUpdated,
 }) => {
   const isFullAdmin = userRole === 'ADMIN_FULL';
+  const [adminSection, setAdminSection] = useState<'subscribers' | 'full-admins'>(
+    'subscribers'
+  );
 
   const [subscribers, setSubscribers] = useState<SubscriberRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -344,27 +351,64 @@ export const AdminSubscribersView: React.FC<AdminSubscribersViewProps> = ({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={exportCsv}
-            className="px-3.5 h-10 rounded-xl bg-white/15 hover:bg-white/25 text-white border border-white/25 text-xs font-semibold inline-flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <Download className="w-4 h-4" />
-            <span>Exportar CSV</span>
-          </button>
-          {isFullAdmin && (
+        {(!isFullAdmin || adminSection === 'subscribers') && (
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              onClick={() => setShowAddForm((v) => !v)}
-              className="btn-tech-calc h-10 px-4 text-xs"
+              onClick={exportCsv}
+              className="px-3.5 h-10 rounded-xl bg-white/15 hover:bg-white/25 text-white border border-white/25 text-xs font-semibold inline-flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Plus className="w-4 h-4" />
-              <span>{showAddForm ? 'Fechar Formulário' : 'Novo Assinante'}</span>
+              <Download className="w-4 h-4" />
+              <span>Exportar CSV</span>
             </button>
-          )}
-        </div>
+            {isFullAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowAddForm((v) => !v)}
+                className="btn-tech-calc h-10 px-4 text-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{showAddForm ? 'Fechar Formulário' : 'Novo Assinante'}</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Section Switcher (ADMIN_FULL only) */}
+      {isFullAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAdminSection('subscribers')}
+            className={`px-4 h-10 rounded-xl text-xs font-semibold inline-flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              adminSection === 'subscribers'
+                ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-indigo-700 hover:bg-slate-50'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Assinantes e Pagos</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdminSection('full-admins')}
+            className={`px-4 h-10 rounded-xl text-xs font-semibold inline-flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              adminSection === 'full-admins'
+                ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-indigo-700 hover:bg-slate-50'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>Administradores FULL</span>
+          </button>
+        </div>
+      )}
+
+      {isFullAdmin && adminSection === 'full-admins' ? (
+        <FullAdminsManager onCurrentUserUpdated={onCurrentUserUpdated} />
+      ) : (
+        <>
 
       {/* 4-Column SaaS Billing KPI Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -1260,6 +1304,8 @@ export const AdminSubscribersView: React.FC<AdminSubscribersViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

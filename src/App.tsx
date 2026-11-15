@@ -432,7 +432,10 @@ export default function App() {
           )}
           {activeTab === 'admin' &&
             (user.role === 'ADMIN_FULL' || user.role === 'ADMIN_PAID' ? (
-              <AdminSubscribersView userRole={user.role} />
+              <AdminSubscribersView
+                userRole={user.role}
+                onCurrentUserUpdated={setUser}
+              />
             ) : (
               <div className="bg-white border border-rose-200 rounded-2xl p-8 text-center space-y-4 max-w-lg mx-auto my-8">
                 <h2 className="text-lg font-bold text-slate-900">

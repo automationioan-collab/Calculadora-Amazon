@@ -258,3 +258,12 @@ export interface FreeEligibilityResult {
   requiresSubscriptionNow: boolean;
   message: string;
 }
+
+export interface AdminFullRecord {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  companyName: string;
+  isCurrentUser?: boolean;
+}

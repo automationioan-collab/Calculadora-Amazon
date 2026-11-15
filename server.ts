@@ -8,6 +8,7 @@ import {
   calculateUnitEconomics,
 } from './src/utils/amazonBr';
 import type {
+  AdminFullRecord,
   AlertNotificationConfig,
   AlertRule,
   CompetitorWatch,
@@ -1685,6 +1686,194 @@ async function startServer() {
     auth.db.subscribers = subscribers.filter((s) => s.id !== req.params.id);
     await saveDb(auth.db);
     res.json({ subscribers: auth.db.subscribers });
+  });
+
+  // --- ADMIN FULL ACCOUNT MANAGEMENT (ADMIN_FULL ONLY) ---
+  const listFullAdmins = (
+    db: WorkspaceState,
+    currentUserId: string
+  ): AdminFullRecord[] =>
+    db.users
+      .filter((u) => u.role === 'ADMIN_FULL')
+      .map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        phone: u.phone || '',
+        companyName: u.companyName,
+        isCurrentUser: u.id === currentUserId,
+      }));
+
+  app.get('/api/admin/full-admins', async (req, res) => {
+    const auth = await requireAdminFull(req, res);
+    if (!auth) return;
+    res.json({ admins: listFullAdmins(auth.db, auth.user.id) });
+  });
+
+  app.post('/api/admin/full-admins', async (req, res) => {
+    const auth = await requireAdminFull(req, res);
+    if (!auth) return;
+    const { name, email, phone, companyName, password } = req.body as {
+      name?: string;
+      email?: string;
+      phone?: string;
+      companyName?: string;
+      password?: string;
+    };
+
+    if (!name?.trim() || !email?.trim()) {
+      return res.status(400).json({
+        error: 'Informe nome e e-mail do Administrador FULL.',
+      });
+    }
+    if (!password || password.length < 6) {
+      return res.status(400).json({
+        error: 'Informe uma senha com pelo menos 6 caracteres.',
+      });
+    }
+
+    const emailNorm = normalizeEmail(email);
+    const existing = auth.db.users.find((u) => normalizeEmail(u.email) === emailNorm);
+    if (existing) {
+      return res.status(409).json({
+        error:
+          existing.role === 'ADMIN_FULL'
+            ? 'Já existe um Administrador FULL com este e-mail.'
+            : 'Este e-mail já pertence a um assinante cadastrado. Use outro e-mail para o Administrador FULL.',
+      });
+    }
+
+    const newId = `admin-${crypto.randomUUID().slice(0, 8)}`;
+    const created: StoredUser = {
+      id: newId,
+      name: name.trim(),
+      email: emailNorm,
+      phone: (phone || '').trim(),
+      amazonAccountId: `ADMIN-${newId.slice(-4).toUpperCase()}`,
+      companyName: (companyName || 'AmzHub BR Administração').trim(),
+      taxRegime: 'Lucro Presumido',
+      defaultTaxRate: 6.5,
+      avatarUrl: AVATAR_URL,
+      role: 'ADMIN_FULL',
+      passwordHash: hashPassword(password),
+    };
+
+    auth.db.users.unshift(created);
+    auth.db.competitors[newId] = [...SEED_COMPETITORS];
+    auth.db.storeSkus[newId] = [...SEED_STORE_SKUS];
+    auth.db.supplierBatches[newId] = [];
+    auth.db.plannerScenarios[newId] = [...SEED_PLANNER_SCENARIOS];
+    auth.db.alertSettings = auth.db.alertSettings || {};
+    auth.db.alertSettings[newId] = createDefaultAlertConfig(created.email);
+
+    await saveDb(auth.db);
+    res.status(201).json({
+      admin: {
+        id: created.id,
+        name: created.name,
+        email: created.email,
+        phone: created.phone || '',
+        companyName: created.companyName,
+        isCurrentUser: false,
+      },
+      admins: listFullAdmins(auth.db, auth.user.id),
+    });
+  });
+
+  app.patch('/api/admin/full-admins/:id', async (req, res) => {
+    const auth = await requireAdminFull(req, res);
+    if (!auth) return;
+    const idx = auth.db.users.findIndex(
+      (u) => u.id === req.params.id && u.role === 'ADMIN_FULL'
+    );
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Administrador FULL não encontrado.' });
+    }
+
+    const { name, email, phone, companyName, password } = req.body as {
+      name?: string;
+      email?: string;
+      phone?: string;
+      companyName?: string;
+      password?: string;
+    };
+
+    const current = auth.db.users[idx];
+    const nextEmail = email ? normalizeEmail(email) : current.email;
+    if (
+      nextEmail !== normalizeEmail(current.email) &&
+      auth.db.users.some((u) => u.id !== current.id && normalizeEmail(u.email) === nextEmail)
+    ) {
+      return res.status(409).json({
+        error: 'Este e-mail já está em uso por outra conta.',
+      });
+    }
+
+    if (password && password.length > 0 && password.length < 6) {
+      return res.status(400).json({
+        error: 'A nova senha deve ter pelo menos 6 caracteres.',
+      });
+    }
+
+    auth.db.users[idx] = {
+      ...current,
+      name: name !== undefined ? name.trim() || current.name : current.name,
+      email: nextEmail,
+      phone: phone !== undefined ? phone.trim() : current.phone,
+      companyName:
+        companyName !== undefined
+          ? companyName.trim() || current.companyName
+          : current.companyName,
+      passwordHash:
+        password && password.length >= 6 ? hashPassword(password) : current.passwordHash,
+    };
+
+    await saveDb(auth.db);
+    const updatedUser = auth.db.users[idx];
+    res.json({
+      admin: {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone || '',
+        companyName: updatedUser.companyName,
+        isCurrentUser: updatedUser.id === auth.user.id,
+      },
+      admins: listFullAdmins(auth.db, auth.user.id),
+      updatedCurrentUser:
+        updatedUser.id === auth.user.id ? sanitizeUser(updatedUser, auth.db) : undefined,
+    });
+  });
+
+  app.delete('/api/admin/full-admins/:id', async (req, res) => {
+    const auth = await requireAdminFull(req, res);
+    if (!auth) return;
+    const fullAdmins = auth.db.users.filter((u) => u.role === 'ADMIN_FULL');
+    const target = fullAdmins.find((u) => u.id === req.params.id);
+    if (!target) {
+      return res.status(404).json({ error: 'Administrador FULL não encontrado.' });
+    }
+    if (fullAdmins.length <= 1) {
+      return res.status(400).json({
+        error: 'Não é possível excluir o único Administrador FULL ativo no sistema.',
+      });
+    }
+    if (target.id === auth.user.id) {
+      return res.status(400).json({
+        error:
+          'Você não pode excluir sua própria conta enquanto estiver logado nela. Entre com outro Administrador FULL para excluí-la.',
+      });
+    }
+
+    auth.db.users = auth.db.users.filter((u) => u.id !== target.id);
+    delete auth.db.competitors[target.id];
+    delete auth.db.storeSkus[target.id];
+    delete auth.db.supplierBatches[target.id];
+    delete auth.db.plannerScenarios[target.id];
+    if (auth.db.alertSettings) delete auth.db.alertSettings[target.id];
+
+    await saveDb(auth.db);
+    res.json({ admins: listFullAdmins(auth.db, auth.user.id) });
   });
 
   // Vite middleware in dev, static build in production
